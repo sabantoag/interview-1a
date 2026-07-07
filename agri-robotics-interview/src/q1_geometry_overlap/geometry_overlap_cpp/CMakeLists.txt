@@ -12,6 +12,9 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+# Boost.Geometry and Boost.Geometry.Index are header-only -- no libraries to
+# link, just headers. On Ubuntu: `sudo apt install libboost-dev`.
+find_package(Boost REQUIRED)
 
 include_directories(include)
 
@@ -20,6 +23,7 @@ add_library(geometry_types src/geometry_types.cpp)
 target_include_directories(geometry_types PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
+target_link_libraries(geometry_types PUBLIC Boost::boost)
 ament_target_dependencies(geometry_types geometry_msgs)
 
 # --- given node: publishes mock field/tractor geometry ---

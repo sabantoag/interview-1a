@@ -6,7 +6,7 @@
   <description>
     Interview exercise: compare/overlap geometries reported by an internal
     geometry provider node (field boundary, restricted zone, tractor implement
-    footprint). C++ version.
+    footprint), using Boost.Geometry for the geometric math. C++ version.
   </description>
   <maintainer email="jason.lambert@sabantoag.com">Jason Lambert</maintainer>
   <license>Apache-2.0</license>
@@ -16,6 +16,7 @@
   <depend>rclcpp</depend>
   <depend>std_msgs</depend>
   <depend>geometry_msgs</depend>
+  <depend>boost</depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

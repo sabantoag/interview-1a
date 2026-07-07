@@ -1,7 +1,15 @@
 # Q1 -- Geometry Overlap (field / restricted-zone / implement footprint)
 
 **Target:** mid-level engineer, ~45 minutes.
-**Languages:** C++ (`geometry_overlap_cpp/`) and Python (`geometry_overlap_py/`), functionally identical.
+**Languages:** C++ (`geometry_overlap_cpp/`, using **Boost.Geometry**) and
+Python (`geometry_overlap_py/`, using **Shapely**), functionally identical.
+
+This exercise is deliberately about using a real geospatial library
+*correctly*, not about implementing point-in-polygon or polygon clipping by
+hand. If you want an algorithmic (no-library) version of this exercise
+instead, that's a different variant -- this one tests library fluency,
+correct geometry construction, and defensive/performance thinking around
+library calls.
 
 ## Scenario
 
@@ -17,28 +25,49 @@ publishes three pieces of geometry as the tractor drives:
 - `/tractor/implement_footprint` -- the implement's current footprint on
   the ground, republished as the tractor moves (~2 Hz).
 
-The candidate's job is to fill in the geometry algorithms
-(`geometry_types.hpp`/`.cpp` in C++, `geometry_types.py` in Python) that a
-second node (`overlap_checker_node`, wiring already provided) uses to
-answer two questions on every update:
+The candidate's job is to fill in `geometry_types.{hpp,cpp}` (C++) /
+`geometry_types.py` (Python) -- used by a second node
+(`overlap_checker_node`, wiring already provided) -- to answer two
+questions on every update:
 
 1. **Is the implement currently inside the restricted zone?** (boolean --
-   this is the core, required task)
-2. **Stretch goal:** how much of the implement's footprint currently
-   overlaps the field boundary, in square meters?
+   core, required task)
+2. **How much of the implement's footprint overlaps the field boundary,
+   in square meters?** (also required -- this is a one-liner once you have
+   the library polygons built, not a stretch goal like it was in the
+   hand-rolled version of this exercise)
 
 ## What's given vs. what candidates write
 
 | File | Status |
 |---|---|
-| `geometry_types.{hpp,cpp}` / `geometry_types.py` | **Candidate edits this.** `compute_bounding_box`, `bounding_boxes_overlap`, `segments_intersect`, `polygon_area` are implemented as worked examples. `point_in_polygon` and `polygons_intersect` are `TODO` (required). `clip_convex_polygon` is `TODO` (stretch). |
-| `geometry_provider_node.*` | Given. Publishes mock geometry on a deterministic path. Do not need to read closely, but useful context. |
-| `overlap_checker_node.*` | Given. ROS wiring only -- subscribes, calls the candidate's functions, publishes results. |
+| `geometry_types.{hpp,cpp}` / `geometry_types.py` | **Candidate edits this.** `compute_bounding_box`/`bounding_boxes_overlap` are given as an optional prefilter. `to_boost_polygon`/`to_shapely_polygon`, `polygons_intersect`, and `polygon_intersection_area` are `TODO` (required). `find_intersecting_zones` is `TODO` (stretch -- spatial indexing with an R-tree/STRtree). |
+| `geometry_provider_node.*` | Given. Publishes mock geometry on a deterministic path. |
+| `overlap_checker_node.*` | Given. ROS wiring only -- subscribes, calls the candidate's functions, publishes results. Untouched by the library swap. |
 | `test/test_geometry_types.*` | Given. Plain assert/pytest tests, runnable without ROS (see below) -- candidates can use these to self-check as they go. |
+
+## Required reading before the interview
+
+- C++: candidates need to know Boost.Geometry's polygon type expects a
+  **closed** ring (first point repeated at the end) and a specific winding
+  order (clockwise, by default) -- and that `boost::geometry::correct()`
+  will fix the winding for you once the ring is loaded. This is really the
+  crux of the required part of the C++ exercise; if a candidate is stuck,
+  this is the hint to give.
+- Python: Shapely is much more forgiving (no winding/closure requirements
+  to think about), so the Python version is meaningfully faster to finish
+  -- expect Python candidates to have more time left for the stretch goal
+  than C++ candidates. Calibrate accordingly; this isn't a bug in the
+  exercise, it's a real difference between the two ecosystems worth
+  discussing.
 
 ## Running it
 
 ```bash
+# One-time setup (see the top-level README for details):
+#   sudo apt install libboost-dev
+#   pip install --break-system-packages "shapely>=2.0"
+
 colcon build --symlink-install --packages-select geometry_overlap_cpp geometry_overlap_py
 source install/setup.bash
 
@@ -52,67 +81,22 @@ In another terminal:
 
 ```bash
 ros2 topic echo /safety/restricted_zone_violation
-ros2 topic echo /field/coverage_overlap_area_m2   # stretch goal
+ros2 topic echo /field/coverage_overlap_area_m2
 ```
 
 The mock tractor drives a fixed loop (see `geometry_provider_node`): it
 starts outside the field, drives through it, clips into the restricted
 zone for a few ticks, then exits the field again. You should see
 `restricted_zone_violation` flip `true` for the few ticks where it's in the
-buffer zone, and (if the stretch goal is implemented) the coverage area
-rise as it enters the field, peak while fully inside, and drop back to 0 as
-it leaves.
+buffer zone, and the coverage area rise as it enters the field, peak while
+fully inside, and drop back to 0 as it leaves.
 
 You don't need the ROS graph running at all to iterate on the algorithms
-themselves -- the geometry code has no ROS dependency:
+themselves:
 
 ```bash
-# C++ (no colcon needed for this part):
+# C++ (no colcon needed for this part, just libboost-dev):
 g++ -std=c++17 -Iinclude src/geometry_types.cpp test/test_geometry_types.cpp -o /tmp/test_geo && /tmp/test_geo
 # Python:
 python3 -m pytest test/test_geometry_types.py -v
 ```
-
-## What to look for
-
-- **Correctness of the point-in-polygon test.** Ray casting (even-odd
-  rule) is the expected approach; winding number is also acceptable. Watch
-  for off-by-one errors in the edge-wrap loop and for not handling the
-  "ray is horizontal to an edge" degenerate case (not tested here, but
-  worth asking about).
-- **How they compose `polygons_intersect` from primitives.** The strong
-  signal here is recognizing that vertex-in-polygon alone isn't sufficient
-  (a thin bar can cross a square with no vertex of either inside the
-  other) and that they need the edge-intersection check too. A candidate
-  who jumps straight to "check every edge against every edge" without the
-  bounding-box short-circuit or vertex check isn't necessarily wrong, but
-  it's a good moment to ask about complexity (see below).
-- **Use of the given primitives rather than reinventing them.** Do they
-  reach for `bounding_boxes_overlap`/`segments_intersect` or rewrite
-  similar logic inline? Reuse is a good sign of reading the codebase they
-  were handed.
-- **Whether they test as they go.** The unit tests are there to be run
-  early and often -- candidates who write `point_in_polygon`, run the
-  tests, then move on to `polygons_intersect` are working the way you'd
-  want them to on your team.
-- **Stretch: Sutherland-Hodgman clipping.** Don't expect most mid-level
-  candidates to finish this cold in 45 minutes; partial credit for a
-  correct plan (clip subject polygon against each edge of the convex
-  clip polygon, keep the "inside" side) even if the implementation isn't
-  finished.
-
-## Follow-up / discussion questions
-
-- "`polygons_intersect` assumes simple, non-self-intersecting polygons.
-  What could go wrong if a caller passed in a self-intersecting polygon,
-  and how would you defend against it?"
-- "Right now `clip_convex_polygon` assumes `clip_convex` is convex and
-  CCW. What would break if the restricted zone were a concave polygon
-  (e.g. an L-shaped exclusion area), and how would you generalize this?"
-- "The provider node re-publishes the whole footprint polygon every tick
-  even though it's always the same 4-point square, just translated. In a
-  real system with many implements, what would you change about this
-  interface?"
-- "If field boundaries had thousands of vertices (a detailed, surveyed
-  boundary rather than a rectangle), which part of your solution would
-  become the bottleneck, and how would you address it?"

@@ -5,11 +5,9 @@
 // Publishes:
 //   /safety/restricted_zone_violation (std_msgs/Bool)
 //     true iff the current implement footprint overlaps the restricted zone.
-//   /field/coverage_overlap_area_m2 (std_msgs/Float64) [depends on the
-//     stretch goal, clip_convex_polygon()]
+//   /field/coverage_overlap_area_m2 (std_msgs/Float64)
 //     overlap area (m^2) between the implement footprint and the field
-//     boundary. NOTE: field boundary here is convex, satisfying the
-//     assumption in clip_convex_polygon().
+//     boundary, via geometry_overlap_cpp::polygon_intersection_area().
 #include <memory>
 #include <optional>
 

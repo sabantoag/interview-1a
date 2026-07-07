@@ -1,19 +1,24 @@
-"""Plain, ROS-independent geometry primitives.
+"""Geometry algorithms for the Q1 exercise.
 
-Keeping these free of any rclpy/message dependency means you can unit test
-them in isolation (see test/test_geometry_types.py) without spinning up a
-ROS graph.
+This exercise is about using a mature, real geospatial library correctly
+rather than hand-rolling computational-geometry algorithms yourself. We use
+Shapely (https://shapely.readthedocs.io/, requires shapely>=2.0 -- see the
+top-level README for install instructions) for the actual math -- your job
+is to build valid Shapely geometries from the app's plain data and call the
+right library functions on them.
 
-All polygons are assumed to be "simple" (non-self-intersecting). Some
-functions additionally assume the polygon is convex and wound
-counter-clockwise -- that assumption is called out explicitly below.
+All polygons are assumed to be "simple" (non-self-intersecting).
 
-A polygon is represented as a list of Point2D. The edge from poly[i] to
-poly[i+1] (wrapping around) is implicit -- do not repeat the first vertex at
-the end.
+Kept free of any rclpy/message dependency so you can unit test in isolation
+(see test/test_geometry_types.py) without spinning up a ROS graph. This is
+also the type ros_conversions.py converts geometry_msgs/Polygon to/from --
+you don't need to touch that file.
 """
 from dataclasses import dataclass
 from typing import List
+
+from shapely.geometry import Polygon as ShapelyPolygon
+from shapely.strtree import STRtree
 
 
 @dataclass
@@ -22,8 +27,16 @@ class Point2D:
     y: float = 0.0
 
 
+# An ordered list of vertices. Do not repeat the first vertex at the end --
+# Shapely's Polygon constructor handles closing the ring itself.
 Polygon2D = List[Point2D]
 
+
+# -----------------------------------------------------------------------
+# GIVEN -- a cheap prefilter you may find useful (Shapely's own
+# intersects()/intersection() already handle the general case correctly
+# without this, but see the performance discussion in the README).
+# -----------------------------------------------------------------------
 
 @dataclass
 class BoundingBox:
@@ -33,133 +46,72 @@ class BoundingBox:
     max_y: float
 
 
-# -----------------------------------------------------------------------
-# GIVEN -- implemented for you as an example of the expected style/testing
-# pattern. You should not need to change these.
-# -----------------------------------------------------------------------
-
 def compute_bounding_box(poly: Polygon2D) -> BoundingBox:
-    """Axis-aligned bounding box of a polygon."""
     xs = [p.x for p in poly]
     ys = [p.y for p in poly]
     return BoundingBox(min(xs), min(ys), max(xs), max(ys))
 
 
 def bounding_boxes_overlap(a: BoundingBox, b: BoundingBox) -> bool:
-    """Do two bounding boxes overlap (touching counts as overlap)?"""
     return (
         a.min_x <= b.max_x and a.max_x >= b.min_x
         and a.min_y <= b.max_y and a.max_y >= b.min_y
     )
 
 
-def segments_intersect(p1: Point2D, p2: Point2D, p3: Point2D, p4: Point2D) -> bool:
-    """Do segments (p1,p2) and (p3,p4) intersect (including endpoint touches)?"""
-
-    def cross(o: Point2D, a: Point2D, b: Point2D) -> float:
-        return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
-
-    def sign(v: float) -> int:
-        if v > 1e-12:
-            return 1
-        if v < -1e-12:
-            return -1
-        return 0
-
-    d1 = sign(cross(p3, p4, p1))
-    d2 = sign(cross(p3, p4, p2))
-    d3 = sign(cross(p1, p2, p3))
-    d4 = sign(cross(p1, p2, p4))
-
-    if d1 != d2 and d3 != d4:
-        return True
-
-    def on_segment(a: Point2D, b: Point2D, p: Point2D) -> bool:
-        return (
-            min(a.x, b.x) <= p.x <= max(a.x, b.x)
-            and min(a.y, b.y) <= p.y <= max(a.y, b.y)
-        )
-
-    if d1 == 0 and on_segment(p3, p4, p1):
-        return True
-    if d2 == 0 and on_segment(p3, p4, p2):
-        return True
-    if d3 == 0 and on_segment(p1, p2, p3):
-        return True
-    if d4 == 0 and on_segment(p1, p2, p4):
-        return True
-    return False
-
-
-def polygon_area(poly: Polygon2D) -> float:
-    """Unsigned area of a simple polygon via the shoelace formula."""
-    if len(poly) < 3:
-        return 0.0
-    total = 0.0
-    n = len(poly)
-    for i in range(n):
-        p1 = poly[i]
-        p2 = poly[(i + 1) % n]
-        total += (p1.x * p2.y) - (p2.x * p1.y)
-    return abs(total) * 0.5
-
-
 # -----------------------------------------------------------------------
 # TODO (core) -- implement these.
 # -----------------------------------------------------------------------
 
-def point_in_polygon(pt: Point2D, poly: Polygon2D) -> bool:
-    """Is `pt` inside `poly`? `poly` may be non-convex.
+def to_shapely_polygon(poly: Polygon2D) -> ShapelyPolygon:
+    """Build a Shapely Polygon from `poly`.
 
-    Points exactly on an edge may be treated either way (not tested); just
-    be consistent.
-
-    Suggested approach: ray casting (a.k.a. even-odd rule) -- cast a ray
-    from `pt` in any fixed direction (e.g. +x) and count how many polygon
-    edges it crosses. Odd count => inside.
+    Unlike Boost.Geometry, Shapely doesn't care about winding direction and
+    closes the ring for you -- but it's still worth checking `.is_valid` on
+    the result (a self-intersecting or degenerate input would produce an
+    invalid geometry) if you have time.
     """
-    # TODO: implement ray casting (even-odd rule).
-    return False
+    # TODO: implement.
+    return ShapelyPolygon()
 
 
 def polygons_intersect(a: Polygon2D, b: Polygon2D) -> bool:
-    """Do polygons `a` and `b` overlap at all?
+    """Do polygons `a` and `b` overlap at all (touching, containment, or
+    partial overlap all count as true)?
 
-    Touching, one fully containing the other, or partial overlap all count
-    as true. `a` and `b` may be non-convex.
-
-    Suggested approach, cheapest checks first:
-      1. bounding_boxes_overlap() quick reject
-      2. any vertex of `a` inside `b`, or any vertex of `b` inside `a`
-         (point_in_polygon) -- catches full containment and simple overlaps
-      3. any edge of `a` intersects any edge of `b` (segments_intersect) --
-         catches overlaps where no vertex of either polygon is inside the
-         other (e.g. a "+" shape crossing through a square)
+    Use ShapelyPolygon.intersects() -- don't reimplement the geometric test
+    yourself.
     """
-    # TODO: bbox quick reject -> vertex-in-polygon -> edge intersection.
+    # TODO: implement.
     return False
+
+
+def polygon_intersection_area(a: Polygon2D, b: Polygon2D) -> float:
+    """Area (m^2) of the overlap between `a` and `b`.
+
+    Use ShapelyPolygon.intersection() and .area. Returns 0.0 if they don't
+    overlap (an empty intersection's .area is already 0.0, so you likely
+    don't need a special case).
+    """
+    # TODO: implement.
+    return 0.0
 
 
 # -----------------------------------------------------------------------
 # TODO (stretch) -- only if time allows.
 # -----------------------------------------------------------------------
 
-def clip_convex_polygon(subject: Polygon2D, clip_convex: Polygon2D) -> Polygon2D:
-    """Clip `subject` against convex, CCW-wound `clip_convex`.
+def find_intersecting_zones(footprint: Polygon2D, zones: List[Polygon2D]) -> List[int]:
+    """Return the indices (into `zones`) of every zone that `footprint`
+    overlaps.
 
-    Classic Sutherland-Hodgman clipping: walk each edge of clip_convex and
-    keep only the part of `subject` on the "inside" of that edge. Return an
-    empty list if there is no overlap.
+    A naive implementation calls polygons_intersect() once per zone -- O(n)
+    exact geometry tests. Instead, build a shapely.strtree.STRtree over the
+    zones (a broad-phase spatial index over bounding boxes) and query it
+    with `footprint` first; STRtree.query() returns only the *candidates*
+    whose bounding box overlaps (shapely>=2.0 returns their indices
+    directly), so you should still confirm each candidate with an exact
+    .intersects() check before including it in the result.
     """
-    # TODO: Sutherland-Hodgman clipping.
+    # TODO: implement.
     return []
-
-
-# -----------------------------------------------------------------------
-# GIVEN -- built on top of clip_convex_polygon(), once you implement it.
-# -----------------------------------------------------------------------
-
-def polygon_intersection_area(a: Polygon2D, b: Polygon2D) -> float:
-    """Area of the overlap between `a` and `b`, assuming `b` is convex/CCW."""
-    clipped = clip_convex_polygon(a, b)
-    return polygon_area(clipped)
