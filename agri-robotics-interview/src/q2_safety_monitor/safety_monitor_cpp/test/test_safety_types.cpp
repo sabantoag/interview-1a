@@ -15,12 +15,15 @@ namespace
 {
 int g_failures = 0;
 
-void check(bool cond, const char * description)
+const std::string kEngineTempC = "engine_temp_c";
+const std::string kGroundSpeedMps = "ground_speed_mps";
+
+void check(bool cond, const std::string& description)
 {
   if (cond) {
-    std::printf("  [PASS] %s\n", description);
+    std::printf("  [PASS] %s\n", description.c_str());
   } else {
-    std::printf("  [FAIL] %s\n", description);
+    std::printf("  [FAIL] %s\n", description.c_str());
     ++g_failures;
   }
 }
@@ -34,6 +37,93 @@ void check(bool cond, const char * description)
   }
   return "?";
 }
+
+void test_sensor_increasing_violations(const std::string& sensor1, const std::string& sensor2)
+{
+  std::printf("test_sensor_increasing_violations (warning_threshold=3, critical_threshold=8):\n");
+  ViolationTracker tracker(3, 8);
+
+  // In range from the start -> always OK.
+  check(tracker.record(sensor1, true) == Severity::OK, "in-range reading is OK");
+
+  // 1st..2nd consecutive violation -> still OK (below warning_threshold).
+  check(
+    tracker.record(sensor1, false) == Severity::OK,
+    "1st consecutive violation is still OK (" + sensor1 + ")");
+  check(
+    tracker.record(sensor1, false) == Severity::OK,
+    "2nd consecutive violation is still OK (" + sensor1 + ")");
+
+  // 3rd..7th -> WARNING.
+  Severity sev = Severity::OK;
+  for (int i = 0; i < 5; ++i) {
+    sev = tracker.record(sensor1, false);
+  }
+  check(sev == Severity::WARNING, "3rd-7th consecutive violation is WARNING (" + sensor1 + ")");
+
+  // 8th+ -> CRITICAL.
+  sev = tracker.record(sensor1, false);
+  check(sev == Severity::CRITICAL, "8th consecutive violation is CRITICAL (" + sensor1 + ")");
+
+  // Recovering resets the streak.
+  check(
+    tracker.record(sensor1, true) == Severity::OK,
+    "an in-range reading resets to OK (" + sensor1 + ")");
+  check(
+    tracker.record(sensor1, false) == Severity::OK,
+    "streak restarts from 1 after recovery (" + sensor1 + ")");
+
+  // Independent parameters don't share state.
+  for (int i = 0; i < 8; ++i) {
+    tracker.record(sensor2, false);
+  }
+  check(
+    tracker.record(sensor1, false) == Severity::OK,
+    "a different parameter's streak is independent (" + sensor1 + ")");
+}
+
+void test_sensor_fluctuation(const std::string& sensor)
+{
+  std::printf("test_sensor_fluctuation (warning_threshold=3, critical_threshold=8):\n");
+
+  ViolationTracker tracker(3, 8);
+
+  // In range from the start -> always OK.
+  check(tracker.record(sensor, true) == Severity::OK, "in-range reading is OK");
+
+  for (int ii = 0; ii < 5; ii++) {
+    // 1st..2nd consecutive violation -> still OK (below warning_threshold).
+    check(
+      tracker.record(sensor, false) == Severity::OK,
+      "1st consecutive violation is still OK (" + sensor + ")");
+    check(
+      tracker.record(sensor, false) == Severity::OK,
+      "2nd consecutive violation is still OK (" + sensor + ")");
+
+    check(tracker.record(sensor, true) == Severity::OK,
+      "streak restarts after recovery (" + sensor + ")");
+  }
+
+  // 1st..2nd consecutive violation -> still OK (below warning_threshold).
+  check(
+    tracker.record(sensor, false) == Severity::OK,
+    "1st consecutive violation is still OK (" + sensor + ")");
+  check(
+    tracker.record(sensor, false) == Severity::OK,
+    "2nd consecutive violation is still OK (" + sensor + ")");
+
+  // 3rd..7th -> WARNING.
+  Severity sev = Severity::OK;
+  for (int i = 0; i < 5; ++i) {
+    sev = tracker.record(sensor, false);
+  }
+  check(sev == Severity::WARNING, "3rd-7th consecutive violation is WARNING (" + sensor + ")");
+
+  // 8th+ -> CRITICAL.
+  sev = tracker.record(sensor, false);
+  check(sev == Severity::CRITICAL, "8th consecutive violation is CRITICAL (" + sensor + ")");
+}
+
 }  // namespace
 
 int main()
@@ -45,49 +135,8 @@ int main()
     check(!point_in_polygon({100, 100}, field), "far point is outside the field");
   }
 
-  std::printf("ViolationTracker (warning_threshold=3, critical_threshold=8):\n");
-  {
-    ViolationTracker tracker(3, 8);
-
-    // In range from the start -> always OK.
-    check(tracker.record("engine_temp_c", true) == Severity::OK, "in-range reading is OK");
-
-    // 1st..2nd consecutive violation -> still OK (below warning_threshold).
-    check(
-      tracker.record("engine_temp_c", false) == Severity::OK,
-      "1st consecutive violation is still OK");
-    check(
-      tracker.record("engine_temp_c", false) == Severity::OK,
-      "2nd consecutive violation is still OK");
-
-    // 3rd..7th -> WARNING.
-    Severity sev = Severity::OK;
-    for (int i = 0; i < 5; ++i) {
-      sev = tracker.record("engine_temp_c", false);
-    }
-    check(sev == Severity::WARNING, "3rd-7th consecutive violation is WARNING");
-
-    // 8th+ -> CRITICAL.
-    sev = tracker.record("engine_temp_c", false);
-    check(sev == Severity::CRITICAL, "8th consecutive violation is CRITICAL");
-
-    // Recovering resets the streak.
-    check(
-      tracker.record("engine_temp_c", true) == Severity::OK,
-      "an in-range reading resets to OK");
-    check(
-      tracker.record("engine_temp_c", false) == Severity::OK,
-      "streak restarts from 1 after recovery");
-
-    // Independent parameters don't share state.
-    ViolationTracker tracker2(3, 8);
-    for (int i = 0; i < 8; ++i) {
-      tracker2.record("ground_speed_mps", false);
-    }
-    check(
-      tracker2.record("engine_temp_c", false) == Severity::OK,
-      "a different parameter's streak is independent");
-  }
+  test_sensor_increasing_violations(kEngineTempC, kGroundSpeedMps);
+  test_sensor_fluctuation(kEngineTempC);
 
   if (g_failures == 0) {
     std::printf("\nAll tests passed.\n");

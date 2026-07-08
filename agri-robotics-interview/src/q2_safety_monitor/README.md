@@ -63,8 +63,7 @@ implemented correctly); an ERROR-level `ground_speed_mps` entry and
 `/safety/estop` going `true` around t=20s; and an ERROR-level `geofence`
 entry with another `/safety/estop` around t=25s.
 
-As with Q1, the core logic has no ROS dependency and can be iterated on
-without the graph running:
+The core logic has no ROS dependency and can be iterated on by simply running:
 
 ```bash
 # C++:
